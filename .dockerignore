@@ -1,0 +1,7 @@
+jobs/
+cache/
+__pycache__/
+*.pyc
+*.zip
+.git/
+.env
