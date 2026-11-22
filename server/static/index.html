@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video Studio — Free Video Banao</title>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; padding: 16px; max-width: 760px; margin-inline: auto; line-height: 1.5; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  .sub { color: #888; margin: 0 0 20px; }
+  .card { border: 1px solid #8884; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  label { display: block; font-weight: 600; margin: 12px 0 4px; }
+  input, select, textarea { width: 100%; padding: 10px; border: 1px solid #8886; border-radius: 8px; font: inherit; background: transparent; }
+  textarea { min-height: 220px; resize: vertical; }
+  button { cursor: pointer; border: none; border-radius: 8px; padding: 12px 20px; font: inherit; font-weight: 700; background: #2563eb; color: #fff; }
+  button.secondary { background: transparent; color: inherit; border: 1px solid #8886; font-weight: 600; padding: 8px 14px; }
+  button.pay { background: #15803d; }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .row > div { flex: 1; min-width: 140px; }
+  .hint { font-size: .85rem; color: #888; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: .8rem; font-weight: 700; }
+  .queued { background: #8883; } .running { background: #f59e0b33; color: #b45309; }
+  .done { background: #22c55e33; color: #15803d; } .failed { background: #ef444433; color: #b91c1c; }
+  .progress { height: 8px; background: #8883; border-radius: 99px; overflow: hidden; margin: 8px 0; }
+  .progress > div { height: 100%; background: #2563eb; transition: width .5s; }
+  video { width: 100%; border-radius: 8px; margin-top: 10px; }
+  .links a { margin-right: 14px; }
+  pre.log { background: #0002; padding: 10px; border-radius: 8px; overflow-x: auto; font-size: .8rem; max-height: 220px; overflow-y: auto; white-space: pre-wrap; }
+  .note { background: #f59e0b22; border: 1px solid #f59e0b66; border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; font-size: .92rem; }
+  .authbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .quota { font-weight: 700; }
+  footer { margin-top: 28px; font-size: .85rem; color: #888; text-align: center; }
+  footer a { color: inherit; margin: 0 8px; }
+</style>
+</head>
+<body>
+<h1>🎬 Video Studio</h1>
+<p class="sub">Free video banao — Hindi ya English awaaz, asli footage + AI images, captions aur music ke saath.</p>
+
+<div class="authbar" id="authbar"><span class="hint">Login status check ho raha hai...</span></div>
+
+<div class="note" id="setupNote" style="display:none"></div>
+
+<div class="note">
+  <b>Kaise kaam karta hai:</b> Google se login karo → Script daalo → Kokoro voiceover + har ~7 second mein badalne wale visuals (jahan mile wahan asli stock video footage, warna chune hue style mein AI images) + on-screen text + captions + music → 1080p video tayyar.
+  <br><b>Free hai:</b> roz 3 videos tak muft banao. Har video ka pehla 30 second ka preview muft dekho — poori Full HD video download karne ke liye sirf ₹1 pay karo (UPI/Card se, Razorpay ke through).
+  <br><b>Time:</b> 2–3 minute ki video banne mein free hosting par lagbhag 5–10 minute lag sakte hain. Ek time par ek hi video render hoti hai, isliye bheed hone par aapki video queue mein apni baari ka intezar karegi — aapko apna number dikhega. Rendering server par chalti hai — page band karke baad mein wapas aa sakte ho.
+</div>
+
+<div class="card" id="createCard" style="display:none">
+  <h2 style="margin-top:0">Nayi Video Banao</h2>
+  <p class="quota" id="quota"></p>
+  <label for="title">Video ka title</label>
+  <input id="title" placeholder="jaise: Antariksh ke 5 Adbhut Tathya">
+  <div class="row">
+    <div>
+      <label for="lang">Bhasha</label>
+      <select id="lang"><option value="hi">Hindi</option><option value="en">English</option></select>
+    </div>
+    <div>
+      <label for="style">Image Style</label>
+      <select id="style">
+        <option value="cinematic">Cinematic (film jaisa)</option>
+        <option value="madhubani">Madhubani (Indian folk art)</option>
+        <option value="realistic">Realistic photo</option>
+        <option value="cartoon3d">3D Cartoon (Pixar jaisa)</option>
+        <option value="anime">Anime</option>
+        <option value="watercolor">Watercolor painting</option>
+        <option value="oilpainting">Oil painting</option>
+        <option value="cyberpunk">Cyberpunk (neon future)</option>
+      </select>
+    </div>
+    <div>
+      <label for="music">Music</label>
+      <select id="music"><option value="default">Default music</option><option value="none">No music</option></select>
+    </div>
+  </div>
+  <label for="script">Script <span class="hint">(zyada se zyada 400 shabd, lagbhag 2–3 minute ki video; sections khaali line se alag karein)</span></label>
+  <textarea id="script" placeholder="Yahan apni script paste karein..."></textarea>
+  <p class="hint"><span id="words">0</span> shabd ≈ <span id="est">0</span> minute ki video <span id="wordWarn" style="color:#b91c1c;font-weight:700"></span></p>
+  <div class="row">
+    <button id="generate">▶ Video Banao</button>
+    <button class="secondary" id="sample">Sample script bharo</button>
+  </div>
+  <p id="formMsg" class="hint"></p>
+</div>
+
+<div class="card" id="loginCard" style="display:none">
+  <h2 style="margin-top:0">Video banane ke liye login karein</h2>
+  <p>Google account se login karein — sign-up alag se nahi karna hai, login hi sign-up hai. Aapka password humare paas kabhi nahi aata, wo Google ke paas hi rehta hai.</p>
+  <p><button onclick="location.href='/auth/login'">Google se Login karein</button></p>
+</div>
+
+<h2>Meri Videos</h2>
+<div id="jobs"><p class="hint">Login karke apni videos yahan dekhein.</p></div>
+
+<footer>
+  <a href="/about">About</a> · <a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms</a> · <a href="/refund">Refund Policy</a>
+  <br>Video Studio — video banana muft hai, Full HD download ₹1.
+</footer>
+
+<script>
+const SAMPLE = `## Hook
+रुकिए! क्या आपको पता है कि अंतरिक्ष में ऐसी चीज़ें हैं जो आपकी कल्पना से भी परे हैं? आज हम आपको अंतरिक्ष के पाँच ऐसे अद्भुत तथ्य बताने वाले हैं जिन्हें सुनकर आप हैरान रह जाएँगे। तो चलिए, शुरू करते हैं।
+
+## ब्लैक होल
+पहला तथ्य। अंतरिक्ष में ब्लैक होल नाम की एक ऐसी चीज़ है जिसका गुरुत्वाकर्षण इतना मज़बूत है कि रोशनी भी उससे बाहर नहीं निकल सकती। वैज्ञानिकों का मानना है कि हमारी आकाशगंगा के बीच में भी एक विशाल ब्लैक होल है।
+
+## समुद्र का रहस्य
+दूसरा तथ्य। समुद्र का सिर्फ पाँच प्रतिशत हिस्सा ही इंसान ने खोजा है। बाकी पचानवे प्रतिशत आज भी रहस्य है, जहाँ ऐसे जीव रहते हैं जिन्हें हमने कभी देखा ही नहीं।`;
+
+const $ = id => document.getElementById(id);
+const scriptEl = $('script');
+const STYLE_LABELS = { cinematic: 'Cinematic', madhubani: 'Madhubani', realistic: 'Realistic', cartoon3d: '3D Cartoon', anime: 'Anime', watercolor: 'Watercolor', oilpainting: 'Oil painting', cyberpunk: 'Cyberpunk' };
+const MAX_WORDS = 400;
+let ME = null;
+
+function updateEstimate() {
+  const words = scriptEl.value.trim().split(/\s+/).filter(Boolean).length;
+  $('words').textContent = words;
+  $('est').textContent = (words / 150).toFixed(1);
+  $('wordWarn').textContent = words > MAX_WORDS ? ' — 400 shabdon se zyada hai, chhota karein' : '';
+}
+scriptEl.addEventListener('input', updateEstimate);
+$('sample').addEventListener('click', () => { scriptEl.value = SAMPLE; updateEstimate(); });
+
+async function loadMe() {
+  try {
+    const r = await fetch('/api/me');
+    ME = await r.json();
+  } catch (e) { ME = { logged_in: false, oauth_configured: true, payments_configured: true }; }
+  const bar = $('authbar');
+  const note = $('setupNote');
+  if (!ME.oauth_configured) {
+    bar.innerHTML = '<span class="hint">Login abhi set up nahi hua hai.</span>';
+    note.style.display = 'block';
+    note.innerHTML = '<b>Login abhi set up nahi hua hai:</b> is website par Google login abhi configure nahi hua hai. Site ke owner ko Google OAuth keys lagani hain. Tab tak video nahi ban sakti.';
+    $('loginCard').style.display = 'none';
+    $('createCard').style.display = 'none';
+    $('jobs').innerHTML = '<p class="hint">Login set up hone ke baad aapki videos yahan dikhengi.</p>';
+    return;
+  }
+  if (ME.logged_in) {
+    bar.innerHTML = `<span>Namaste, <b>${escapeHtml(ME.name || ME.email)}</b> (${escapeHtml(ME.email)})</span><button class="secondary" onclick="location.href='/auth/logout'">Logout</button>`;
+    $('createCard').style.display = 'block';
+    $('loginCard').style.display = 'none';
+    $('quota').textContent = `Aaj ${ME.videos_remaining}/${ME.videos_limit} videos bache hain (roz ${ME.videos_limit} muft)`;
+    if (!ME.payments_configured) {
+      note.style.display = 'block';
+      note.innerHTML = '<b>Payment abhi set up nahi hua hai:</b> video banana aur 30 second ka preview dekhna chalega, lekin Full HD download ke liye payment abhi chalu nahi hua hai.';
+    }
+    loadJobs();
+  } else {
+    bar.innerHTML = `<span class="hint">Aap login nahi hain.</span><button onclick="location.href='/auth/login'">Google se Login karein</button>`;
+    $('createCard').style.display = 'none';
+    $('loginCard').style.display = 'block';
+    $('jobs').innerHTML = '<p class="hint">Login karke apni videos yahan dekhein.</p>';
+  }
+}
+
+$('generate').addEventListener('click', async () => {
+  const title = $('title').value.trim();
+  const script = scriptEl.value.trim();
+  const lang = $('lang').value;
+  const style = $('style').value;
+  const music = $('music').value;
+  const words = script.split(/\s+/).filter(Boolean).length;
+  if (!title || words < 30) {
+    $('formMsg').textContent = 'Title aur kam se kam 30 shabdon ki script chahiye.';
+    return;
+  }
+  if (words > MAX_WORDS) {
+    $('formMsg').textContent = 'Script 400 shabdon se zyada hai — chhota karein.';
+    return;
+  }
+  $('generate').disabled = true;
+  $('formMsg').textContent = 'Job ban rahi hai...';
+  try {
+    const r = await fetch('/api/jobs', { method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ title, script, lang, style, music }) });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'failed');
+    $('formMsg').textContent = 'Ho gaya! Video queue mein hai — neeche status dekhte rahein.';
+    $('title').value = ''; scriptEl.value = ''; updateEstimate();
+    loadMe(); loadJobs();
+  } catch (e) {
+    $('formMsg').textContent = 'Error: ' + e.message;
+  }
+  $('generate').disabled = false;
+});
+
+async function payFor(id, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Payment shuru ho raha hai...';
+  try {
+    const r = await fetch('/api/jobs/' + id + '/pay', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}' });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'payment shuru nahi ho paya');
+    if (data.paid) { loadJobs(); return; }
+    if (typeof Razorpay === 'undefined') throw new Error('Razorpay load nahi hua — internet check karke phir se koshish karein');
+    const rzp = new Razorpay({
+      key: data.key_id,
+      amount: data.amount,
+      currency: data.currency,
+      name: 'Video Studio',
+      description: 'Full HD video download (₹1)',
+      order_id: data.order_id,
+      handler: async function (resp) {
+        const v = await fetch('/api/jobs/' + id + '/verify', { method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ razorpay_payment_id: resp.razorpay_payment_id, razorpay_order_id: resp.razorpay_order_id, razorpay_signature: resp.razorpay_signature }) });
+        const vd = await v.json();
+        if (!v.ok) throw new Error(vd.error || 'payment verify nahi hua');
+        loadJobs();
+      },
+      modal: { ondismiss: function () { btn.disabled = false; btn.textContent = '₹1 mein Full HD Download'; } },
+      theme: { color: '#15803d' }
+    });
+    rzp.open();
+  } catch (e) {
+    alert('Error: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = '₹1 mein Full HD Download';
+  }
+}
+
+function jobCard(j) {
+  const mins = j.duration_sec ? (j.duration_sec / 60).toFixed(1) + ' min' : '';
+  const badge = `<span class="badge ${j.status}">${j.status}</span>`;
+  const pct = Math.round((j.progress || 0) * 100);
+  const styleLabel = STYLE_LABELS[j.style] || j.style || '';
+  let queueLine = '';
+  if (j.status === 'queued') {
+    if ((j.queue_ahead || 0) > 0) {
+      queueLine = `<br><b>Queue mein #${j.queue_position} — aapke aage ${j.queue_ahead} video ${j.queue_ahead === 1 ? 'hai' : 'hain'}, unke baad aapki video banegi.</b>`;
+    } else {
+      queueLine = '<br><b>Aapki video agle number par hai — render jald shuru hoga.</b>';
+    }
+  }
+  let extra = '';
+  if (j.status === 'done' && j.has_video) {
+    let preview = '';
+    if (j.has_preview && j.preview_url) {
+      preview = `<video controls controlsList="nodownload" oncontextmenu="return false" preload="metadata" src="${escapeHtml(j.preview_url)}"></video><p class="hint">Ye 30 second ka watermark preview hai — sirf dekhne ke liye hai, download nahi hota. Poori video Full HD mein download karne ke liye ₹1 pay karein.</p>`;
+    } else {
+      preview = '<p class="hint">Preview nahi ban paya.</p>';
+    }
+    let download = '';
+    if (j.paid) {
+      download = `<p class="links"><a href="/download/${j.id}/video.mp4" download>⬇ Full HD Video download</a>
+      <a href="/download/${j.id}/video.srt" download>Captions (.srt)</a>
+      <a href="/download/${j.id}/video.attributions.json" download>Image credits</a></p>`;
+    } else {
+      download = `<p><button class="pay" onclick="payFor('${j.id}', this)">₹1 mein Full HD Download</button></p>`;
+    }
+    extra = preview + download;
+  }
+  return `<div class="card">
+    <div><b>${escapeHtml(j.title)}</b> ${badge} <span class="hint">${j.lang === 'hi' ? 'Hindi' : 'English'}${styleLabel ? ' · ' + escapeHtml(styleLabel) : ''} · ${mins} · ${j.created || ''}</span></div>
+    <div class="progress"><div style="width:${pct}%"></div></div>
+    <div class="hint">${escapeHtml(j.message || '')}${queueLine}</div>
+    <p><button class="secondary" onclick="toggleLog('${j.id}')">Log dekho</button></p>
+    <pre class="log" id="log-${j.id}" style="display:none"></pre>
+    ${extra}</div>`;
+}
+
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function toggleLog(id) {
+  const el = document.getElementById('log-' + id);
+  if (el.style.display === 'none') {
+    const r = await fetch('/api/jobs/' + id);
+    const d = await r.json();
+    el.textContent = (d.log || []).join('\n') || '(koi log nahi)';
+    el.style.display = 'block';
+  } else el.style.display = 'none';
+}
+
+async function loadJobs() {
+  try {
+    const r = await fetch('/api/jobs');
+    if (r.status === 401) return;
+    const d = await r.json();
+    const el = $('jobs');
+    el.innerHTML = d.jobs.length ? d.jobs.map(jobCard).join('') : '<p class="hint">Abhi koi video nahi bani hai.</p>';
+  } catch (e) { /* server busy — next poll retries */ }
+}
+
+updateEstimate();
+loadMe();
+setInterval(() => { if (ME && ME.logged_in) loadJobs(); }, 10000);
+</script>
+</body>
+</html>
