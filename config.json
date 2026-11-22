@@ -1,0 +1,53 @@
+{
+  "caption_font": {
+    "en": "DejaVu Sans",
+    "hi": "Noto Sans Devanagari"
+  },
+  "caption_size": 40,
+  "crf": 23,
+  "music_default": "music/synth_chill_gmaj.wav",
+  "pexels_api_key": "",
+  "preset": "veryfast",
+  "speed": 1.0,
+  "voices": {
+    "en": "af_heart",
+    "hi": "hm_omega"
+  },
+  "styles": {
+    "cinematic": {
+      "label": "Cinematic (film jaisa)",
+      "suffix": "cinematic realistic photo, dramatic lighting, high detail, sharp focus"
+    },
+    "madhubani": {
+      "label": "Madhubani (Indian folk art)",
+      "suffix": "Madhubani painting, traditional Indian Madhubani folk art from Bihar, flat vibrant colors, bold black outlines, intricate geometric patterns, red yellow green orange palette, detailed folk motifs, handmade paper texture",
+      "template": "{scene}, Madhubani folk art painting, traditional Indian Madhubani style from Bihar, flat vibrant colors, bold black outlines, intricate geometric patterns, red yellow green orange, no people, no faces, no woman, no man, no deity, no human figure, no portrait, no text, no watermark"
+    },
+    "realistic": {
+      "label": "Realistic photo",
+      "suffix": "photorealistic photo, natural light, high detail, sharp focus"
+    },
+    "cartoon3d": {
+      "label": "3D Cartoon (Pixar jaisa)",
+      "suffix": "3D animated movie style, Pixar-like, vibrant colors, soft studio lighting, high detail"
+    },
+    "anime": {
+      "label": "Anime",
+      "suffix": "anime style illustration, vibrant colors, detailed cel shading, Japanese animation"
+    },
+    "watercolor": {
+      "label": "Watercolor painting",
+      "suffix": "watercolor painting style, soft brush strokes, gentle colors, artistic, detailed"
+    },
+    "oilpainting": {
+      "label": "Oil painting",
+      "suffix": "classical oil painting style, rich colors, visible brushwork, detailed"
+    },
+    "cyberpunk": {
+      "label": "Cyberpunk (neon future)",
+      "suffix": "cyberpunk style, neon lights, futuristic glow, dramatic lighting, high detail"
+    }
+  },
+  "style_default": "cinematic",
+  "pixabay_api_key": ""
+}
