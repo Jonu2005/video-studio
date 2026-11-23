@@ -8,12 +8,17 @@ FROM python:3.10-slim
 
 # System tools: ffmpeg (video), espeak-ng (Kokoro phonemes),
 # fonts for Hindi + English captions.
+# NOTE (23 Nov 2026): Debian 13 (Trixie) moved the espeak data dir from
+# /usr/share/espeak-ng-data to /usr/lib/x86_64-linux-gnu/espeak-ng-data,
+# and espeak-ng does NOT depend on espeak-ng-data here — install it
+# explicitly and check the NEW path (the old path failed 2 builds).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg espeak-ng espeak-ng-data libespeak-ng1 \
     fonts-noto-core fonts-dejavu-core curl \
     && rm -rf /var/lib/apt/lists/* \
-    && test -d /usr/share/espeak-ng-data \
-    && test -f /usr/lib/x86_64-linux-gnu/libespeak-ng.so.1
+    && test -d /usr/lib/x86_64-linux-gnu/espeak-ng-data \
+    && test -f /usr/lib/x86_64-linux-gnu/libespeak-ng.so.1 \
+    && espeak-ng --version
 
 WORKDIR /app
 
@@ -39,7 +44,7 @@ RUN mkdir -p jobs
 ENV KOKORO_MODEL=/app/models/kokoro-v1.0.fp16.onnx \
     KOKORO_VOICES=/app/models/voices-v1.0.bin \
     ESPEAK_LIB=/usr/lib/x86_64-linux-gnu/libespeak-ng.so.1 \
-    ESPEAK_DATA=/usr/share/espeak-ng-data \
+    ESPEAK_DATA=/usr/lib/x86_64-linux-gnu/espeak-ng-data \
     VIDEO_STUDIO_KOKORO_PYTHON=python3 \
     PYTHONUNBUFFERED=1
 
