@@ -8,24 +8,24 @@ This is the Hugging Face deploy copy. Differences from the local server:
 - Jobs are private per user (namespaced by Google user id). Job IDs are
   full uuid4 values, and every read/download checks ownership.
 - Rate limit: 3 videos per user per day, counted server-side.
-- Each finished video gets a 30-second 480p watermarked preview
-  (preview.mp4). The full 1080p download costs Rs 1 via Razorpay and is
-  served only after a verified payment (paid.json). The preview is
-  watch-only: it is served on a short-lived signed URL (10 minutes),
-  with no-store headers and no download control in the player.
-  (Screen recording cannot be blocked by any website.)
+- FREE LAUNCH (23 Nov 2026): videos are fully free for now — no
+  payment, no preview gate. Finished videos can be watched and
+  downloaded in full 1080p by their owner right away. (The Razorpay
+  Rs 1 pay-per-download + 30s preview version is kept in git history
+  — repo commit 899d2c38 — and in
+  ~/workspace/video-studio/with-payment-backup/ for when payments
+  are added later.)
 - Renders run strictly one at a time, FIFO by job creation, because
   the free server is tiny (0.1 CPU). Waiting jobs report their queue
   position. Jobs left queued/running by a server restart are
   re-queued automatically on startup, so no visitor's video is lost
   when the free server sleeps.
 
-All secrets come from environment variables (set as Hugging Face Space
-secrets): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, OAUTH_REDIRECT_URI,
-SESSION_SECRET, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET. Without the
-Google keys the server still starts, but login shows a clear
-"login not configured yet" state. Without Razorpay keys the pay button
-shows "payment not set up yet". No secret is ever written to a file.
+All secrets come from environment variables (set as hosting
+dashboard secrets): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET,
+OAUTH_REDIRECT_URI, SESSION_SECRET. Without the Google keys the
+server still starts, but login shows a clear "login not configured
+yet" state. No secret is ever written to a file.
 
 Run:
     python3 server/app.py [--port 7860] [--host 0.0.0.0]
@@ -44,7 +44,6 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -63,8 +62,6 @@ CONFIG_PATH = os.path.join(PROJECT_ROOT, "config.json")
 MAX_SCRIPT_WORDS = 400
 # Free creation limit per user per day.
 DAILY_VIDEO_LIMIT = 3
-# Preview links live for 10 minutes; the player page refreshes them.
-PREVIEW_TOKEN_MINUTES = 10
 # ffmpeg threads cap for the small free server (0.1 CPU).
 FFMPEG_THREADS = "2"
 SESSION_DAYS = 30
@@ -72,23 +69,12 @@ SESSION_DAYS = 30
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
-RAZORPAY_ORDERS_URL = "https://api.razorpay.com/v1/orders"
 
 JOB_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 ALLOWED_FILES = {
     "video.mp4", "video.srt", "video.attributions.json",
     "video.summary.json", "render.log", "script.txt",
 }
-# Files that are free for the owner; video.mp4 additionally needs payment.
-FREE_FILES = ALLOWED_FILES - {"video.mp4"}
-
-# Fonts for the PREVIEW watermark (DejaVu ships in the Docker image).
-WATERMARK_FONTS = [
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
-    "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-]
 
 
 def env(name):
@@ -99,8 +85,6 @@ def env(name):
 GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = env("GOOGLE_CLIENT_SECRET")
 OAUTH_REDIRECT_URI = env("OAUTH_REDIRECT_URI")
-RAZORPAY_KEY_ID = env("RAZORPAY_KEY_ID")
-RAZORPAY_KEY_SECRET = env("RAZORPAY_KEY_SECRET")
 SESSION_SECRET = env("SESSION_SECRET")
 if not SESSION_SECRET:
     # Sessions still work, but they stop being valid after a restart.
@@ -112,10 +96,6 @@ if not SESSION_SECRET:
 def oauth_configured():
     return bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET
                 and OAUTH_REDIRECT_URI)
-
-
-def payments_configured():
-    return bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET)
 
 
 def known_styles():
@@ -234,48 +214,6 @@ def parse_cookies(header):
     return cookies
 
 
-# --- preview tokens --------------------------------------------------------
-
-def make_preview_token(job_id):
-    """Short-lived signed token for one job's preview (10 minutes).
-
-    Keyed by SESSION_SECRET (a random per-process key when unset), so a
-    token cannot be forged or moved to another job. Format:
-    <expiry-epoch>.<hex-hmac>.
-    """
-    exp = int(time.time()) + PREVIEW_TOKEN_MINUTES * 60
-    message = ("%s.%d" % (job_id, exp)).encode("utf-8")
-    sig = hmac.new(SESSION_SECRET.encode("utf-8"), message,
-                   hashlib.sha256).hexdigest()
-    return "%d.%s" % (exp, sig)
-
-
-def verify_preview_token(job_id, token):
-    """True only for a genuine, unexpired token for this job."""
-    if not token or "." not in token:
-        return False
-    exp_text, _, sig = token.rpartition(".")
-    try:
-        exp = int(exp_text)
-    except ValueError:
-        return False
-    if exp < int(time.time()):
-        return False
-    message = ("%s.%d" % (job_id, exp)).encode("utf-8")
-    expected = hmac.new(SESSION_SECRET.encode("utf-8"), message,
-                        hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, sig)
-
-
-def preview_url(job_id):
-    """Signed preview URL for a finished preview, or None."""
-    if not os.path.exists(os.path.join(job_dir(job_id), "preview.mp4")):
-        return None
-    token = make_preview_token(job_id)
-    return "/preview/%s?token=%s" % (
-        job_id, urllib.parse.quote(token, safe=""))
-
-
 # --- job helpers ---------------------------------------------------------
 
 def job_dir(job_id):
@@ -306,10 +244,6 @@ def read_meta(job_id):
         with open(path, encoding="utf-8") as handle:
             return json.load(handle)
     return {}
-
-
-def is_paid(job_id):
-    return os.path.exists(os.path.join(job_dir(job_id), "paid.json"))
 
 
 def owns_job(job_id, user):
@@ -374,73 +308,11 @@ def list_jobs(owner):
             "queue_position": position,
             "queue_ahead": (position - 1) if position else 0,
             "has_video": os.path.exists(os.path.join(path, "video.mp4")),
-            "has_preview": os.path.exists(
-                os.path.join(path, "preview.mp4")),
-            "preview_url": preview_url(job_id),
-            "paid": is_paid(job_id),
             "duration_sec": summary.get("duration_sec"),
         })
     # Job IDs are random uuids, so sort by creation time, newest first.
     jobs.sort(key=lambda job: job.get("created", ""), reverse=True)
     return jobs
-
-
-# --- preview --------------------------------------------------------------
-
-def _watermark_font():
-    for candidate in WATERMARK_FONTS:
-        if os.path.exists(candidate):
-            return candidate
-    return None
-
-
-def make_preview(directory):
-    """Build preview.mp4: first 30s, 480p, PREVIEW watermark.
-
-    Returns True on success. A preview failure must never fail the job,
-    so callers log the False and carry on.
-    """
-    src = os.path.join(directory, "video.mp4")
-    out = os.path.join(directory, "preview.mp4")
-    font = _watermark_font()
-    big = ("text='PREVIEW':fontsize=72:fontcolor=white@0.85:borderw=2:"
-           "bordercolor=black@0.9:box=1:boxcolor=black@0.35:boxborderw=16:"
-           "x=(w-text_w)/2:y=(h-text_h)/2")
-    small = ("text='Video Studio':fontsize=26:fontcolor=white@0.8:"
-             "borderw=1:bordercolor=black@0.8:x=16:y=16")
-    if font:
-        vf = ("scale=854:480:force_original_aspect_ratio=decrease,"
-              "pad=854:480:(ow-iw)/2:(oh-ih)/2,"
-              "drawtext=fontfile=%s:%s,drawtext=fontfile=%s:%s"
-              % (font, big, font, small))
-        attempts = [vf]
-    else:
-        # No font file found: try drawtext with the fontconfig default.
-        attempts = [
-            ("scale=854:480:force_original_aspect_ratio=decrease,"
-             "pad=854:480:(ow-iw)/2:(oh-ih)/2,"
-             "drawtext=%s,drawtext=%s" % (big, small)),
-            # Last resort: a visible band, no text.
-            ("scale=854:480:force_original_aspect_ratio=decrease,"
-             "pad=854:480:(ow-iw)/2:(oh-ih)/2,"
-             "drawbox=x=0:y=200:w=854:h=80:color=black@0.5:t=fill"),
-        ]
-    for vf in attempts:
-        cmd = ["ffmpeg", "-y", "-v", "error", "-i", src, "-t", "30",
-               "-vf", vf,
-               "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-               "-threads", FFMPEG_THREADS,
-               "-c:a", "aac", "-movflags", "+faststart", out]
-        result = subprocess.run(cmd, stdout=subprocess.DEVNULL,
-                                stderr=subprocess.PIPE, text=True,
-                                timeout=300)
-        if result.returncode == 0 and os.path.exists(out):
-            return True
-        print("preview attempt failed: %s"
-              % result.stderr.strip().splitlines()[-1:]
-              if result.stderr else "preview attempt failed",
-              file=sys.stderr)
-    return False
 
 
 # --- render worker --------------------------------------------------------
@@ -476,18 +348,15 @@ def run_render(job_id, title, lang, music, style="cinematic"):
                     pass
             time.sleep(5)
     if process.returncode == 0 and os.path.exists(out_path):
-        write_status(job_id, "running", "Preview ban raha hai...", 0.98)
-        preview_ok = make_preview(directory)
         summary = {}
         summary_path = os.path.join(directory, "video.summary.json")
         if os.path.exists(summary_path):
             with open(summary_path, encoding="utf-8") as handle:
                 summary = json.load(handle)
         mins = (summary.get("duration_sec") or 0) / 60
-        message = f"Video tayyar hai ({mins:.1f} minute)"
-        if not preview_ok:
-            message += " (preview nahi ban paya — phir bhi download kar sakte hain)"
-        write_status(job_id, "done", message, 1.0)
+        write_status(job_id, "done",
+                     f"Video tayyar hai ({mins:.1f} minute) — dekh kar download karein",
+                     1.0)
     else:
         write_status(job_id, "failed",
                      "Render fail ho gaya — log mein detail dekhein", 0.0)
@@ -591,40 +460,6 @@ def exchange_code_for_user(code):
     return user
 
 
-# --- Razorpay -------------------------------------------------------------
-
-def create_razorpay_order(job_id):
-    """Create a Rs 1 Razorpay order. Returns the order dict."""
-    payload = json.dumps({
-        "amount": PRICE_PAISE,
-        "currency": "INR",
-        "receipt": "vs-" + job_id[:30],
-        "notes": {"job_id": job_id},
-    }).encode("utf-8")
-    basic = base64.b64encode(
-        ("%s:%s" % (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET)
-         ).encode("utf-8")).decode("ascii")
-    request = urllib.request.Request(
-        RAZORPAY_ORDERS_URL, data=payload,
-        headers={"Content-Type": "application/json",
-                 "Authorization": "Basic " + basic})
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")[:300]
-        raise ValueError("Razorpay order nahi ban paya (%s): %s"
-                         % (exc.code, body))
-
-
-def verify_razorpay_signature(order_id, payment_id, signature):
-    """True when the Razorpay payment signature checks out."""
-    message = ("%s|%s" % (order_id, payment_id)).encode("utf-8")
-    expected = hmac.new(RAZORPAY_KEY_SECRET.encode("utf-8"), message,
-                        hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature or "")
-
-
 # --- HTTP handler ---------------------------------------------------------
 
 LEGAL_PAGES = {
@@ -699,15 +534,13 @@ class Handler(BaseHTTPRequestHandler):
             if not user:
                 return self.send_json({
                     "logged_in": False,
-                    "oauth_configured": oauth_configured(),
-                    "payments_configured": payments_configured()})
+                    "oauth_configured": oauth_configured()})
             used = videos_used_today(user["sub"])
             return self.send_json({
                 "logged_in": True,
                 "email": user.get("email", ""),
                 "name": user.get("name", ""),
                 "oauth_configured": oauth_configured(),
-                "payments_configured": payments_configured(),
                 "videos_used_today": used,
                 "videos_limit": DAILY_VIDEO_LIMIT,
                 "videos_remaining": max(0, DAILY_VIDEO_LIMIT - used)})
@@ -758,33 +591,7 @@ class Handler(BaseHTTPRequestHandler):
                 "queue_ahead": (position - 1) if position else 0,
                 "has_video": os.path.exists(
                     os.path.join(job_dir(job_id), "video.mp4")),
-                "has_preview": os.path.exists(
-                    os.path.join(job_dir(job_id), "preview.mp4")),
-                "preview_url": preview_url(job_id),
-                "paid": is_paid(job_id),
             })
-        match = re.match(r"^/preview/([A-Za-z0-9_-]+)$", path)
-        if match:
-            user = self.require_user()
-            if not user:
-                return
-            job_id = match.group(1)
-            token = query.get("token", [None])[0]
-            if not verify_preview_token(job_id, token):
-                return self.send_json(
-                    {"error": "preview link expire ho gaya — page refresh "
-                              "karke phir se dekhein"}, 401)
-            if not owns_job(job_id, user):
-                return self.send_json({"error": "job not found"}, 404)
-            file_path = os.path.join(job_dir(job_id), "preview.mp4")
-            if not os.path.exists(file_path):
-                return self.send_json({"error": "preview not ready"}, 404)
-            return self.serve_file(
-                file_path, "video/mp4",
-                extra_headers=[
-                    ("Cache-Control", "no-store"),
-                    ("X-Content-Type-Options", "nosniff"),
-                    ("Content-Disposition", "inline")])
         match = re.match(r"^/download/([A-Za-z0-9_-]+)/([A-Za-z0-9_.-]+)$",
                          path)
         if match:
@@ -796,10 +603,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": "file not allowed"}, 403)
             if not owns_job(job_id, user):
                 return self.send_json({"error": "file not found"}, 404)
-            if filename == "video.mp4" and not is_paid(job_id):
-                return self.send_json(
-                    {"error": "full HD download ke liye pehle Rs 1 pay karein",
-                     "payment_required": True}, 402)
             file_path = os.path.join(job_dir(job_id), filename)
             if not os.path.exists(file_path):
                 return self.send_json({"error": "file not found"}, 404)
@@ -856,12 +659,6 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/jobs":
             return self.create_job(payload)
-        match = re.match(r"^/api/jobs/([A-Za-z0-9_-]+)/pay$", path)
-        if match:
-            return self.create_payment(match.group(1))
-        match = re.match(r"^/api/jobs/([A-Za-z0-9_-]+)/verify$", path)
-        if match:
-            return self.verify_payment(match.group(1), payload)
         return self.send_json({"error": "not found"}, 404)
 
     def create_job(self, payload):
@@ -922,78 +719,6 @@ class Handler(BaseHTTPRequestHandler):
                                "videos_remaining":
                                    max(0, DAILY_VIDEO_LIMIT - used - 1)})
 
-    def create_payment(self, job_id):
-        user = self.require_user()
-        if not user:
-            return
-        if not owns_job(job_id, user):
-            return self.send_json({"error": "job not found"}, 404)
-        if is_paid(job_id):
-            return self.send_json({"paid": True})
-        if not payments_configured():
-            return self.send_json(
-                {"error": "payment abhi set up nahi hua hai — site ke owner "
-                          "ko Razorpay keys lagani hain",
-                 "payment_not_configured": True}, 503)
-        if not os.path.exists(os.path.join(job_dir(job_id), "video.mp4")):
-            return self.send_json({"error": "video abhi tayyar nahi hai"},
-                                  400)
-        try:
-            order = create_razorpay_order(job_id)
-        except Exception as exc:
-            sys.stderr.write("Razorpay order failed: %s\n" % exc)
-            return self.send_json(
-                {"error": "payment shuru nahi ho paya — thodi der baad phir "
-                          "se koshish karein"}, 502)
-        with open(os.path.join(job_dir(job_id), "order.json"), "w",
-                  encoding="utf-8") as handle:
-            json.dump({"order_id": order.get("id"),
-                       "amount": PRICE_PAISE,
-                       "created": time.strftime("%Y-%m-%d %H:%M:%S",
-                                                 time.gmtime())},
-                      handle, ensure_ascii=False)
-        return self.send_json({
-            "order_id": order.get("id"),
-            "key_id": RAZORPAY_KEY_ID,
-            "amount": PRICE_PAISE,
-            "currency": "INR",
-            "job_id": job_id})
-
-    def verify_payment(self, job_id, payload):
-        user = self.require_user()
-        if not user:
-            return
-        if not owns_job(job_id, user):
-            return self.send_json({"error": "job not found"}, 404)
-        if not payments_configured():
-            return self.send_json(
-                {"error": "payment abhi set up nahi hua hai"}, 503)
-        order_id = str(payload.get("razorpay_order_id", ""))
-        payment_id = str(payload.get("razorpay_payment_id", ""))
-        signature = str(payload.get("razorpay_signature", ""))
-        if not order_id or not payment_id or not signature:
-            return self.send_json({"error": "payment details adhoori hain"},
-                                  400)
-        order_path = os.path.join(job_dir(job_id), "order.json")
-        if os.path.exists(order_path):
-            with open(order_path, encoding="utf-8") as handle:
-                stored = json.load(handle)
-            if stored.get("order_id") != order_id:
-                return self.send_json(
-                    {"error": "order match nahi hua"}, 400)
-        if not verify_razorpay_signature(order_id, payment_id, signature):
-            return self.send_json(
-                {"error": "payment verify nahi hua — signature galat hai"},
-                400)
-        with open(os.path.join(job_dir(job_id), "paid.json"), "w",
-                  encoding="utf-8") as handle:
-            json.dump({"payment_id": payment_id, "order_id": order_id,
-                       "amount_paise": PRICE_PAISE,
-                       "paid_at": time.strftime("%Y-%m-%d %H:%M:%S",
-                                                  time.gmtime())},
-                      handle, ensure_ascii=False)
-        return self.send_json({"paid": True})
-
     def serve_file(self, path, content_type, extra_headers=None):
         try:
             size = os.path.getsize(path)
@@ -1022,7 +747,7 @@ def main():
     print("Video Studio (website version) chal raha hai: "
           "http://%s:%d" % (args.host, args.port))
     print("Google login configured: %s" % oauth_configured())
-    print("Razorpay payment configured: %s" % payments_configured())
+    print("Free launch: video banana aur download karna muft hai.")
     print("Rokne ke liye Ctrl+C dabayein.")
     recover_interrupted_jobs()
     threading.Thread(target=worker, daemon=True).start()
