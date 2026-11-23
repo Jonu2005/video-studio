@@ -44,7 +44,7 @@
 <div class="note" id="setupNote" style="display:none"></div>
 
 <div class="note">
-  <b>Kaise kaam karta hai:</b> Google se login karo → Script daalo → Kokoro voiceover + har ~7 second mein badalne wale visuals (jahan mile wahan asli stock video footage, warna chune hue style mein AI images) + on-screen text + captions + music → 1080p video tayyar.
+  <b>Kaise kaam karta hai:</b> Google se login karo → Script daalo → AI voiceover + har ~7 second mein badalne wale visuals (jahan mile wahan asli stock video footage, warna chune hue style mein AI images) + on-screen text + captions + music → 1080p video tayyar.
   <br><b>Bilkul free hai:</b> roz 3 videos tak muft banao aur poori Full HD video muft mein download karo — launch offer mein abhi koi payment nahi hai.
   <br><b>Time:</b> 2–3 minute ki video banne mein free hosting par lagbhag 5–10 minute lag sakte hain. Ek time par ek hi video render hoti hai, isliye bheed hone par aapki video queue mein apni baari ka intezar karegi — aapko apna number dikhega. Rendering server par chalti hai — page band karke baad mein wapas aa sakte ho.
 </div>
@@ -229,12 +229,23 @@ async function toggleLog(id) {
 }
 
 async function loadJobs() {
+  // Keep any open log views open across the 10s refresh: re-rendering
+  // the jobs list used to wipe them (Nov 2026 bug — the log button
+  // looked broken because the log vanished within 10 seconds).
+  const openLogs = {};
+  document.querySelectorAll('pre.log').forEach(el => {
+    if (el.style.display !== 'none') openLogs[el.id] = el.textContent;
+  });
   try {
     const r = await fetch('/api/jobs');
     if (r.status === 401) return;
     const d = await r.json();
     const el = $('jobs');
     el.innerHTML = d.jobs.length ? d.jobs.map(jobCard).join('') : '<p class="hint">Abhi koi video nahi bani hai.</p>';
+    for (const [id, text] of Object.entries(openLogs)) {
+      const logEl = document.getElementById(id);
+      if (logEl) { logEl.textContent = text; logEl.style.display = 'block'; }
+    }
   } catch (e) { /* server busy — next poll retries */ }
 }
 
