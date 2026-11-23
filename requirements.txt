@@ -1,8 +1,10 @@
-# Video Studio — Python dependencies (engine + standalone server + Kokoro TTS).
+# Video Studio — Python dependencies (engine + standalone server + Piper TTS).
 # System tools (ffmpeg, espeak-ng, fonts) come from the Dockerfile.
+# (Nov 2026: narration uses Piper, not Kokoro — Kokoro needs ~580MB
+# peak RSS on CPU, more than the 512MB free container; Piper needs
+# ~249MB. piper-tts bundles its own onnxruntime + espeak data.)
 Pillow>=10.0
 requests>=2.31
-kokoro-onnx>=0.4.0
-onnxruntime>=1.17
+piper-tts>=1.8.0
 soundfile>=0.12
 numpy>=1.26
