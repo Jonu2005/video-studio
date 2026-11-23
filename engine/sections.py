@@ -52,9 +52,9 @@ def parse_script(text):
 
 
 def clean_script_text(sections):
-    """Rebuild a narration-only script (no titles/hints) for Kokoro.
+    """Rebuild a narration-only script (no titles/hints) for the narrator.
 
-    Sections stay separated by blank lines, so Kokoro's own section
+    Sections stay separated by blank lines, so the narrator's own section
     splitter produces the exact same numbering (section_01..NN).
     """
     return "\n\n".join(s["text"] for s in sections) + "\n"
