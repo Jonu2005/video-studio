@@ -4,7 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Video Studio — Free Video Banao</title>
-<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <style>
   :root { color-scheme: light dark; }
   * { box-sizing: border-box; }
@@ -17,7 +16,6 @@
   textarea { min-height: 220px; resize: vertical; }
   button { cursor: pointer; border: none; border-radius: 8px; padding: 12px 20px; font: inherit; font-weight: 700; background: #2563eb; color: #fff; }
   button.secondary { background: transparent; color: inherit; border: 1px solid #8886; font-weight: 600; padding: 8px 14px; }
-  button.pay { background: #15803d; }
   button:disabled { opacity: .5; cursor: default; }
   .row { display: flex; gap: 12px; flex-wrap: wrap; }
   .row > div { flex: 1; min-width: 140px; }
@@ -47,7 +45,7 @@
 
 <div class="note">
   <b>Kaise kaam karta hai:</b> Google se login karo → Script daalo → Kokoro voiceover + har ~7 second mein badalne wale visuals (jahan mile wahan asli stock video footage, warna chune hue style mein AI images) + on-screen text + captions + music → 1080p video tayyar.
-  <br><b>Free hai:</b> roz 3 videos tak muft banao. Har video ka pehla 30 second ka preview muft dekho — poori Full HD video download karne ke liye sirf ₹1 pay karo (UPI/Card se, Razorpay ke through).
+  <br><b>Bilkul free hai:</b> roz 3 videos tak muft banao aur poori Full HD video muft mein download karo — launch offer mein abhi koi payment nahi hai.
   <br><b>Time:</b> 2–3 minute ki video banne mein free hosting par lagbhag 5–10 minute lag sakte hain. Ek time par ek hi video render hoti hai, isliye bheed hone par aapki video queue mein apni baari ka intezar karegi — aapko apna number dikhega. Rendering server par chalti hai — page band karke baad mein wapas aa sakte ho.
 </div>
 
@@ -100,7 +98,7 @@
 
 <footer>
   <a href="/about">About</a> · <a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms</a> · <a href="/refund">Refund Policy</a>
-  <br>Video Studio — video banana muft hai, Full HD download ₹1.
+  <br>Video Studio — video banana aur download karna abhi bilkul muft hai.
 </footer>
 
 <script>
@@ -132,7 +130,7 @@ async function loadMe() {
   try {
     const r = await fetch('/api/me');
     ME = await r.json();
-  } catch (e) { ME = { logged_in: false, oauth_configured: true, payments_configured: true }; }
+  } catch (e) { ME = { logged_in: false, oauth_configured: true }; }
   const bar = $('authbar');
   const note = $('setupNote');
   if (!ME.oauth_configured) {
@@ -149,10 +147,6 @@ async function loadMe() {
     $('createCard').style.display = 'block';
     $('loginCard').style.display = 'none';
     $('quota').textContent = `Aaj ${ME.videos_remaining}/${ME.videos_limit} videos bache hain (roz ${ME.videos_limit} muft)`;
-    if (!ME.payments_configured) {
-      note.style.display = 'block';
-      note.innerHTML = '<b>Payment abhi set up nahi hua hai:</b> video banana aur 30 second ka preview dekhna chalega, lekin Full HD download ke liye payment abhi chalu nahi hua hai.';
-    }
     loadJobs();
   } else {
     bar.innerHTML = `<span class="hint">Aap login nahi hain.</span><button onclick="location.href='/auth/login'">Google se Login karein</button>`;
@@ -193,40 +187,6 @@ $('generate').addEventListener('click', async () => {
   $('generate').disabled = false;
 });
 
-async function payFor(id, btn) {
-  btn.disabled = true;
-  btn.textContent = 'Payment shuru ho raha hai...';
-  try {
-    const r = await fetch('/api/jobs/' + id + '/pay', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}' });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'payment shuru nahi ho paya');
-    if (data.paid) { loadJobs(); return; }
-    if (typeof Razorpay === 'undefined') throw new Error('Razorpay load nahi hua — internet check karke phir se koshish karein');
-    const rzp = new Razorpay({
-      key: data.key_id,
-      amount: data.amount,
-      currency: data.currency,
-      name: 'Video Studio',
-      description: 'Full HD video download (₹1)',
-      order_id: data.order_id,
-      handler: async function (resp) {
-        const v = await fetch('/api/jobs/' + id + '/verify', { method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ razorpay_payment_id: resp.razorpay_payment_id, razorpay_order_id: resp.razorpay_order_id, razorpay_signature: resp.razorpay_signature }) });
-        const vd = await v.json();
-        if (!v.ok) throw new Error(vd.error || 'payment verify nahi hua');
-        loadJobs();
-      },
-      modal: { ondismiss: function () { btn.disabled = false; btn.textContent = '₹1 mein Full HD Download'; } },
-      theme: { color: '#15803d' }
-    });
-    rzp.open();
-  } catch (e) {
-    alert('Error: ' + e.message);
-    btn.disabled = false;
-    btn.textContent = '₹1 mein Full HD Download';
-  }
-}
-
 function jobCard(j) {
   const mins = j.duration_sec ? (j.duration_sec / 60).toFixed(1) + ' min' : '';
   const badge = `<span class="badge ${j.status}">${j.status}</span>`;
@@ -242,21 +202,10 @@ function jobCard(j) {
   }
   let extra = '';
   if (j.status === 'done' && j.has_video) {
-    let preview = '';
-    if (j.has_preview && j.preview_url) {
-      preview = `<video controls controlsList="nodownload" oncontextmenu="return false" preload="metadata" src="${escapeHtml(j.preview_url)}"></video><p class="hint">Ye 30 second ka watermark preview hai — sirf dekhne ke liye hai, download nahi hota. Poori video Full HD mein download karne ke liye ₹1 pay karein.</p>`;
-    } else {
-      preview = '<p class="hint">Preview nahi ban paya.</p>';
-    }
-    let download = '';
-    if (j.paid) {
-      download = `<p class="links"><a href="/download/${j.id}/video.mp4" download>⬇ Full HD Video download</a>
-      <a href="/download/${j.id}/video.srt" download>Captions (.srt)</a>
-      <a href="/download/${j.id}/video.attributions.json" download>Image credits</a></p>`;
-    } else {
-      download = `<p><button class="pay" onclick="payFor('${j.id}', this)">₹1 mein Full HD Download</button></p>`;
-    }
-    extra = preview + download;
+    extra = `<video controls preload="metadata" src="/download/${j.id}/video.mp4"></video>
+    <p class="links"><a href="/download/${j.id}/video.mp4" download>⬇ Full HD Video download (muft)</a>
+    <a href="/download/${j.id}/video.srt" download>Captions (.srt)</a>
+    <a href="/download/${j.id}/video.attributions.json" download>Image credits</a></p>`;
   }
   return `<div class="card">
     <div><b>${escapeHtml(j.title)}</b> ${badge} <span class="hint">${j.lang === 'hi' ? 'Hindi' : 'English'}${styleLabel ? ' · ' + escapeHtml(styleLabel) : ''} · ${mins} · ${j.created || ''}</span></div>
