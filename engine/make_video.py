@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Video Studio — free, unlimited, open-source long-form video generator.
 
-Documentary/explainer style: script -> Kokoro narration -> visuals
+Documentary/explainer style: script -> Piper narration -> visuals
 planned per ~7s beat (real stock footage first — Pexels/Pixabay when
 a key is set, else Wikimedia Commons — then AI-generated images per
 beat in the chosen style, Openverse stock, title card) with Ken Burns
@@ -39,7 +39,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENGINE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 WIDTH, HEIGHT, FPS = 1920, 1080, 30
-SECTION_GAP_S = 0.5       # silence between sections (matches Kokoro helper)
+SECTION_GAP_S = 0.5       # silence between sections (matches Piper helper)
 MUSIC_VOLUME = 0.15
 TARGET_MEAN_DB = -17.0
 MAX_ADJUST_DB = 6.0
@@ -50,7 +50,7 @@ CROSSFADE_S = 0.5         # crossfade between consecutive images
 MOTIONS = ("zoom-in", "zoom-out", "pan-right", "pan-left")
 
 DEFAULT_CONFIG = {
-    "voices": {"hi": "hm_omega", "en": "af_heart"},
+    "voices": {"hi": "priyamvada", "en": "amy"},
     "speed": 1.0,
     "music_default": os.path.expanduser(
         "~/workspace/youtube/music/synth_chill_gmaj.wav"),
@@ -72,19 +72,23 @@ def load_config(path):
     return config
 
 
-def resolve_kokoro():
-    """Find the Kokoro helper script and its Python interpreter."""
-    script = os.environ.get("VIDEO_STUDIO_KOKORO_SCRIPT")
+def resolve_narrator():
+    """Find the Piper narration helper script and its Python interpreter.
+
+    (Nov 2026: the website uses Piper, not Kokoro — Kokoro needs
+    ~580MB peak RSS on CPU, more than the 512MB free container;
+    Piper needs ~249MB. The main engine + Awesome Hacks still use
+    Kokoro on the Muse VM, where memory is not constrained.)
+    """
+    script = os.environ.get("VIDEO_STUDIO_NARRATOR_SCRIPT")
     if not script:
-        vendored = os.path.join(ENGINE_DIR, "vendor", "kokoro_narrate.py")
+        vendored = os.path.join(ENGINE_DIR, "vendor", "piper_narrate.py")
         original = os.path.expanduser(
-            "~/workspace/tools/kokoro_narrate.py")
+            "~/workspace/tools/piper_narrate.py")
         script = vendored if os.path.exists(vendored) else original
-    python = os.environ.get("VIDEO_STUDIO_KOKORO_PYTHON")
+    python = os.environ.get("VIDEO_STUDIO_NARRATOR_PYTHON")
     if not python:
-        venv_python = os.path.expanduser(
-            "~/workspace/tools/kokoro-venv/bin/python")
-        python = venv_python if os.path.exists(venv_python) else sys.executable
+        python = sys.executable
     return python, script
 
 
@@ -135,10 +139,10 @@ class Job:
         os.replace(tmp_path, self.status_path)
 
 
-# Narration is the longest stage (Kokoro synthesises at ~1x real-time on
-# CPU, so it lasts about as long as the finished audio). Its progress band
-# in status.json runs from NARRATION_PROGRESS_START to _END, advanced once
-# per finished section so the UI bar keeps moving instead of sitting at 5%
+# Narration (Piper synthesises ~5x real-time on CPU, so it is quick
+# even on the small free container). Its progress band in status.json
+# runs from NARRATION_PROGRESS_START to _END, advanced once per
+# finished section so the UI bar keeps moving instead of sitting at 5%
 # for the whole stage.
 NARRATION_PROGRESS_START = 0.05
 NARRATION_PROGRESS_END = 0.40
@@ -147,10 +151,10 @@ _SECTION_WAV_RE = re.compile(r"section_(\d+)\.wav")
 
 def run_narration(job, clean_script, narration_path, sections_dir,
                   voice, speed, lang, total_sections):
-    """Run the Kokoro helper; stream its output so progress is visible,
+    """Run the Piper helper; stream its output so progress is visible,
     and turn each finished section wav into a status.json update."""
-    python, helper = resolve_kokoro()
-    log(f"narration: Kokoro voice={voice} lang={lang} "
+    python, helper = resolve_narrator()
+    log(f"narration: Piper voice={voice} lang={lang} "
         f"(helper: {helper})")
     cmd = [python, helper, clean_script, narration_path,
            "--sections-dir", sections_dir,
@@ -158,7 +162,7 @@ def run_narration(job, clean_script, narration_path, sections_dir,
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                stderr=subprocess.STDOUT, text=True)
     for line in process.stdout:
-        print(f"  kokoro: {line.rstrip()}", flush=True)
+        print(f"  piper: {line.rstrip()}", flush=True)
         # The helper writes "-> .../section_NN.wav" as each section's
         # narration lands on disk — that is the sub-stage progress signal.
         match = _SECTION_WAV_RE.search(line)
@@ -175,9 +179,9 @@ def run_narration(job, clean_script, narration_path, sections_dir,
     process.wait()
     if process.returncode != 0:
         raise render_mod.RenderError(
-            f"Kokoro narration failed (exit {process.returncode})")
+            f"Piper narration failed (exit {process.returncode})")
     if not os.path.exists(narration_path):
-        raise render_mod.RenderError("Kokoro produced no narration file")
+        raise render_mod.RenderError("Piper produced no narration file")
 
 
 def build_music_track(bed_path, total_duration, out_path):
@@ -309,7 +313,7 @@ def main():
     parser.add_argument("--lang", default="hi", choices=["hi", "en"],
                         help="Script language (default: hi)")
     parser.add_argument("--voice", default=None,
-                        help="Kokoro voice (default from config)")
+                        help="Piper voice (default from config)")
     parser.add_argument("--music", default=None,
                         help="Music bed .wav (default from config; "
                              "'none' for no music)")
@@ -377,8 +381,8 @@ def main():
     with open(clean_script, "w", encoding="utf-8") as handle:
         handle.write(section_mod.clean_script_text(parsed))
 
-    # 2. Narration (Kokoro, per section) — or reuse existing wavs.
-    job.stage("narration", 0.05, "Step 1/5: generating narration (Kokoro)")
+    # 2. Narration (Piper, per section) — or reuse existing wavs.
+    job.stage("narration", 0.05, "Step 1/5: generating narration (Piper)")
     narration_path = os.path.join(workdir, "narration.wav")
     sections_dir = os.path.join(workdir, "sections")
     existing = [os.path.join(sections_dir, f"section_{i:02d}.wav")
@@ -405,7 +409,7 @@ def main():
     log(f"narration done: total {total_duration:.1f}s "
         f"({total_duration / 60:.1f} min)")
 
-    # Kokoro's output is quiet; measure it and lift the narration to the
+    # Measure the narration level and lift it to the target so the
     # target loudness at mix time. The gain is capped so peaks stay
     # below -3 dB (no clipping).
     narr_mean, narr_max = render_mod.volumedetect(narration_path)
