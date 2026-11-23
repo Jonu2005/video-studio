@@ -330,12 +330,22 @@ def run_render(job_id, title, lang, music, style="cinematic"):
     if music == "none":
         cmd += ["--music", "none"]
     write_status(job_id, "running", "Render shuru ho gaya...", 0.02)
+    # Safety net (Nov 2026): a render must never hang forever — the
+    # first Kokoro render sat at Step 1/5 for 30+ min with no error.
+    # After 45 min the job fails with a clear message instead.
+    render_started = time.time()
+    timed_out = False
     with open(log_path, "w", encoding="utf-8") as log_file:
         process = subprocess.Popen(
             cmd, stdout=log_file, stderr=subprocess.STDOUT,
             cwd=PROJECT_ROOT, text=True)
         # Mirror the engine's own progress into our status file.
         while process.poll() is None:
+            if time.time() - render_started > 2700:
+                process.kill()
+                process.wait()
+                timed_out = True
+                break
             if os.path.exists(work_status):
                 try:
                     with open(work_status, encoding="utf-8") as handle:
@@ -347,6 +357,11 @@ def run_render(job_id, title, lang, music, style="cinematic"):
                 except (OSError, ValueError):
                     pass
             time.sleep(5)
+    if timed_out:
+        write_status(job_id, "failed",
+                     "Render bahut slow tha (45 minute se zyada) — "
+                     "dobara koshish karein", 0.0)
+        return
     if process.returncode == 0 and os.path.exists(out_path):
         summary = {}
         summary_path = os.path.join(directory, "video.summary.json")
