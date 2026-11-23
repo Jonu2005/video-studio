@@ -9,7 +9,7 @@ FROM python:3.10-slim
 # System tools: ffmpeg (video), espeak-ng (Kokoro phonemes),
 # fonts for Hindi + English captions.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg espeak-ng libespeak-ng1 \
+    ffmpeg espeak-ng espeak-ng-data libespeak-ng1 \
     fonts-noto-core fonts-dejavu-core curl \
     && rm -rf /var/lib/apt/lists/* \
     && test -d /usr/share/espeak-ng-data \
