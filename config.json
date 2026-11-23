@@ -10,8 +10,8 @@
   "preset": "veryfast",
   "speed": 1.0,
   "voices": {
-    "en": "af_heart",
-    "hi": "hm_omega"
+    "en": "amy",
+    "hi": "priyamvada"
   },
   "styles": {
     "cinematic": {
